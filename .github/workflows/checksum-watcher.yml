@@ -2,8 +2,8 @@ name: Checksum watcher
 
 on:
   schedule:
-    # Runs every day at 03:15 UTC (04:15/05:15 in Norway depending on DST)
-    - cron: "15 3 * * *"
+    # Runs every day at 11:00 UTC (12:00/13:00 in Norway depending on DST)
+    - cron: "0 11 * * *"
   workflow_dispatch: {}
 
 permissions:
