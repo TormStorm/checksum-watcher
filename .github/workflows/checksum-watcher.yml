@@ -1,0 +1,62 @@
+name: Checksum watcher
+
+on:
+  schedule:
+    # Runs every day at 03:15 UTC (04:15/05:15 in Norway depending on DST)
+    - cron: "15 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # so we can push the updated log
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute and compare checksum
+        id: checksum
+        run: |
+          set -euo pipefail
+
+          FILE_URL="https://cdn.jagex.com/Jagex%20Launcher%20Installer.exe"
+          LOG_FILE="checksums.log"
+
+          tmpfile=$(mktemp)
+          curl -fsSL "$FILE_URL" -o "$tmpfile"
+
+          # sha256sum prints: "<hash>  <filename>"
+          NEW_SUM=$(sha256sum "$tmpfile" | awk '{print $1}')
+
+          # Read last sum if the file exists
+          LAST_SUM=""
+          if [ -f "$LOG_FILE" ]; then
+            # log line format we'll use: "2025-10-30T03:15:00Z <hash>"
+            LAST_SUM=$(tail -n 1 "$LOG_FILE" | awk '{print $2}')
+          fi
+
+          if [ "$NEW_SUM" != "$LAST_SUM" ]; then
+            NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            echo "$NOW $NEW_SUM" >> "$LOG_FILE"
+            echo "changed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change in checksum."
+            echo "changed=0" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "new_sum=$NEW_SUM" >> "$GITHUB_OUTPUT"
+          echo "last_sum=${LAST_SUM:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push if changed
+        if: steps.checksum.outputs.changed == '1'
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add checksums.log
+          git commit -m "chore: checksum updated $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          git push
