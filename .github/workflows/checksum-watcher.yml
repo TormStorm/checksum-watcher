@@ -27,13 +27,10 @@ jobs:
           tmpfile=$(mktemp)
           curl -fsSL "$FILE_URL" -o "$tmpfile"
 
-          # sha256sum prints: "<hash>  <filename>"
           NEW_SUM=$(sha256sum "$tmpfile" | awk '{print $1}')
 
-          # Read last sum if the file exists
           LAST_SUM=""
           if [ -f "$LOG_FILE" ]; then
-            # log line format we'll use: "2025-10-30T03:15:00Z <hash>"
             LAST_SUM=$(tail -n 1 "$LOG_FILE" | awk '{print $2}')
           fi
 
@@ -42,21 +39,38 @@ jobs:
             echo "$NOW $NEW_SUM" >> "$LOG_FILE"
             echo "changed=1" >> "$GITHUB_OUTPUT"
           else
-            echo "No change in checksum."
             echo "changed=0" >> "$GITHUB_OUTPUT"
           fi
 
           echo "new_sum=$NEW_SUM" >> "$GITHUB_OUTPUT"
           echo "last_sum=${LAST_SUM:-}" >> "$GITHUB_OUTPUT"
 
+      - name: Send Discord notification
+        if: steps.checksum.outputs.changed == '1'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          NEW_SUM="${{ steps.checksum.outputs.new_sum }}"
+          LAST_SUM="${{ steps.checksum.outputs.last_sum }}"
+
+          # Build a basic Discord message
+          CONTENT="✅ Checksum changed at $NOW\nNew: $NEW_SUM"
+          if [ -n "$LAST_SUM" ]; then
+            CONTENT="$CONTENT\nPrev: $LAST_SUM"
+          fi
+
+          curl -fsSL -H "Content-Type: application/json" \
+            -d "$(jq -n --arg content "$CONTENT" '{content: $content}')" \
+            "$DISCORD_WEBHOOK_URL"
+
       - name: Commit and push if changed
         if: steps.checksum.outputs.changed == '1'
         run: |
           set -euo pipefail
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add checksums.log
           git commit -m "chore: checksum updated $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
           git push
